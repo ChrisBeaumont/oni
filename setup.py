@@ -10,6 +10,7 @@ EMAIL = 'chrisnbeaumont@gmail.com'
 REQUIRED = [
     "pandas",
     "scipy",
+    "PyYaml"
 ]
 
 setup(

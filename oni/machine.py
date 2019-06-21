@@ -286,43 +286,11 @@ class System:
         )
 
 
-    def _balance_cvxpy(self, data):
-        import cvxpy as cp
-
-        uptime = cp.Variable(shape=(len(self),), nonneg=True)
-        constraints = [
-            uptime * data['A_ub'].T <= data['b_ub'],
-            uptime >= 0,
-            uptime <= 1
-        ]
-
-        if data['A_eq'] is not None:
-            constraints.append(uptime * data['A_eq'].T == data['b_eq'])
-
-        target = cp.Maximize(cp.sum(uptime))
-
-        problem = cp.Problem(target, constraints)
-        kwarg_set = [
-            dict(solver='ECOS_BB', mi_abs_eps=1e-7, mi_rel_eps=1e-7, mi_max_iters=100000),
-            dict(solver='SCS', eps=1e-7, max_iters=100000),
-            dict(solver='ECOS', abstol=1e-7, reltol=1e-7, feastol=1e-7, max_iters=100000),
-            dict(solver='OSQP', eps_abs=1e-7, eps_rel=1e-7, max_iter=100000),
-        ]
-
-        for kwargs in kwarg_set:
-            try:
-                problem.solve(**kwargs)
-                break
-            except cp.SolverError:
-                pass
-        else:
-            raise cp.SolverError("Could not solve balance equation")
-
-        return uptime.value
-
-
     def _balance_scipy(self, data):
-        from scipy.optimize import linprog
+        try:
+            from scipy.optimize import linprog
+        except ImportError:
+            raise ImportError("SciPy is required to balance systems")
 
         c = -1 * np.ones(data['A_ub'].shape[1])
         sol = linprog(c, **data)
@@ -336,7 +304,6 @@ class System:
 
         data = self._build_balance_problem(as_list(neutralize))
         uptime = self._balance_scipy(data)
-        #uptime = self._balance_cvxpy(data)
 
         for m, u in zip(self, uptime):
             m.uptime = u

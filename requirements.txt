@@ -1,4 +1,6 @@
+# This requirements file is for binder, so it includes oni itself.
 PyYAML
 pandas
 numpy
 scipy
+oni

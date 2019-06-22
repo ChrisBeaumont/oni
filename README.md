@@ -7,3 +7,7 @@ The `oni` library helps balance systems of machines in the game Oxygen Not Inclu
 ## Installation
 
 ``pip install oni``
+
+## Acknowledgements
+
+Most of the data for machines and resources comes from [Oxygen Not Included Database](http://oni-db.com), [oni-assistant](http://oni-assistant.com), and the [Oxygen Not Included Wiki](https://oxygennotincluded.gamepedia.com/Oxygen_Not_Included_Wiki). Thanks to those tools. Errors in the data are likely my fault, introduced during transcription.

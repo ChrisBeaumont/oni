@@ -10,6 +10,7 @@ class ResourceMeta(type):
 
 
 def all_resources():
+    """Return a list of all resources"""
     return sorted(RESOURCES, key=str)
 
 

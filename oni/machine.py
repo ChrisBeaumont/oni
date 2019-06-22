@@ -19,10 +19,26 @@ MACHINES = []
 
 
 def all_machines():
+    """Return a list of all machines"""
     return sorted(MACHINES, key=str)
 
 
 def create_machine(name, needs=None, gives=None):
+    """Create a new machine.
+
+    Parameters
+    ----------
+    name : str
+        The class name of the new machine
+    needs: dict  (optional)
+        Mapping of Resources to quantities consumed per second by the machine
+    gives: dict (optional)
+        Mapping of Resources to quantities produced per second by the machine
+
+    Returns
+    -------
+    The newly-created machine class
+    """
     needs = needs or {}
     gives = gives or {}
 
@@ -38,23 +54,12 @@ def create_machine(name, needs=None, gives=None):
     return result
 
 
-def _parse_machine(name, contents):
-    needs = {
-        _get_or_create_resource(r): q
-        for r, q in
-        contents.get('needs', {}).items()
-    }
-
-    gives = {
-        _get_or_create_resource(r): q
-        for r, q in
-        contents.get('gives', {}).items()
-    }
-
-    return create_machine(name, needs=needs, gives=gives)
-
 
 class Machine:
+    """Something that needs or gives resources when used.
+
+    Machines can be added together to form systems.
+    """
     _greedy = True  # Prefer to run machine as much as possible
 
     def __init__(self):
@@ -65,20 +70,34 @@ class Machine:
         return type(self).__name__
 
     def throttle(self, uptime):
+        """
+        Set the uptime for a machine.
+
+        Parameters
+        ----------
+        uptime : float
+         The fraction of time the machine is on, between 0 and 1.
+
+        Returns
+        -------
+        self
+        """
         self.uptime = uptime
         return self
 
     def needs(self):
+        """A dict mapping resources to quantities consumed per second at the
+        current uptime."""
         return {k: v * self.uptime for k, v in self._needs().items()}
 
     def gives(self):
+        """A dict mapping resources to quantities produced per second at the
+        current uptime."""
         return {k: v * self.uptime for k, v in self._gives().items()}
 
     def net_output(self):
         """
         Return the net output (gives - needs) from the system.
-
-        If drop=True, resources with near-zero net output will be excluded.
         """
         result = self.gives()
         for k, v in self.needs().items():
@@ -110,6 +129,7 @@ class Machine:
 
 
 class Source(Machine):
+    """Provides a specified quantity of a resource per second"""
     _greedy = False
 
     def __init__(self, resource, qty):
@@ -129,7 +149,7 @@ class Source(Machine):
 
 
 class MultiMachine(Machine):
-
+    """Represents several copies of a machine"""
     def __init__(self, machine, qty):
         super().__init__()
         self.machine = machine
@@ -151,7 +171,7 @@ class MultiMachine(Machine):
 
 
 class Sink(Machine):
-
+    """Consumes a specified quantity of a resource per second."""
     def __init__(self, resource, qty):
         super().__init__()
         self.resource = resource
@@ -185,6 +205,22 @@ def _expand_wildcards(name, contents):
         yield name, contents
 
 
+def _parse_machine(name, contents):
+    needs = {
+        _get_or_create_resource(r): q
+        for r, q in
+        contents.get('needs', {}).items()
+    }
+
+    gives = {
+        _get_or_create_resource(r): q
+        for r, q in
+        contents.get('gives', {}).items()
+    }
+
+    return create_machine(name, needs=needs, gives=gives)
+
+
 for rec in manifest.items():
     for name, contents in _expand_wildcards(*rec):
         #print(name, contents)
@@ -192,8 +228,17 @@ for rec in manifest.items():
 
 
 class System:
+    """
+    A system is a collection of subsystems (individual machines).
 
+    The individual machiens can be accessed with bracket notation
+    """
     def __init__(self, *subsystems):
+        """Build a new system.
+
+        Note, it is more common to build a system by adding together machines,
+        rather than calling System directly.
+        """
         self.subsystems = subsystems
 
     def __str__(self):
@@ -239,6 +284,7 @@ class System:
 
 
     def reset(self):
+        """Set the uptime of all machines to 1"""
         for s in self.subsystems:
             s.uptime = 1
 
@@ -249,6 +295,16 @@ class System:
         return len(self.subsystems)
 
     def _usage_matrix(self, normalize=True):
+        """
+        Returns a dataframe whose rows are machines and whose columns are
+        resources. The entries give the amount consumed (negative) or produced
+        (positive) per second at full uptime.
+
+        Parameters
+        ----------
+        normalize : Boolean, default True
+            If True, each resource will be scaled to a similar magnitude.
+        """
         result = pd.DataFrame([
             {str(k): v for k, v in s.net_output().items()} for s in self
         ]).fillna(0)
@@ -260,6 +316,25 @@ class System:
         return result
 
     def _build_balance_problem(self, neutralize):
+        """
+        Return a dictionary describing a balance optimization program. The program
+        is represented by
+
+        uptime * A_ub <= b_ub
+        uptime * A_eq == b_eq (if not None)
+        uptime between bounds
+
+        Parameters
+        ----------
+        neutralize : ['all'] or a list of resources.
+            These resources are constrained to be exactly balanced. Other
+            resources are only required to be non-negative in the net-output
+            of the scaled system.
+
+        Returns
+        -------
+        A dict containing each constraint array.
+        """
         usage = self._usage_matrix()
         A_ub = -1 * usage.T.values
         b_ub = np.zeros(len(A_ub))
@@ -287,6 +362,9 @@ class System:
 
 
     def _balance_scipy(self, data):
+        """
+        Use scipy to optimize a given balance problem.
+        """
         try:
             from scipy.optimize import linprog
         except ImportError:
@@ -298,6 +376,18 @@ class System:
         return sol.x
 
     def balance(self, neutralize=tuple(), **kwargs):
+        """
+        Set the uptime for each machine in the system to satisfy the following:
+
+        - No resource is consumed more than produced
+        - All resources in the `neutralize` keyword are consumed and produced at
+          equal amounts. Neutralize='all' or True will neutralize all resources.
+        - Uptime is maximized
+
+        Returns
+        -------
+        self, with each machines uptime updated to the balanced value.
+        """
         self.reset()
         if neutralize == 'all' or neutralize == True:
             neutralize = ['all']
@@ -310,6 +400,12 @@ class System:
         return self
 
     def impute(self):
+        """
+        Build a new system which extends the current system
+        with Sources and Sinks, to match any resource that is
+        only consumed or produced. The ensures that balancing
+        the system leads to nonzero uptime.
+        """
         self.reset()
         n = self.needs()
         g = self.gives()
